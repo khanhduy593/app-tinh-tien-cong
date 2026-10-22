@@ -11,6 +11,9 @@
 <meta name="theme-color" content="#5f8f82">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <title>Tiền công thợ may</title>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -100,7 +103,7 @@ input.cpick{width:50px;min-width:50px;flex:none;padding:3px}
 </head>
 <body>
 <div class="wrap">
-  <h1>🧵 Tiền công của tôi <small id="st"></small></h1>
+  <h1>🧵 Tiền công của tôi <small id="st" data-a="gotk" style="cursor:pointer"></small></h1>
   <div id="app"></div>
 </div>
 <div class="tabs"><div id="tabs"></div></div>
@@ -209,9 +212,9 @@ function allMonths(){var s={};for(var d in S.logs)s[d.slice(0,7)]=1;for(var d2 i
 
 /* ---- lưu ---- */
 var dbDoc=null,tmr=null;
-function save(){[curDate.slice(0,7),curMonth].forEach(function(y){if(!S.allow[y]&&hasWork(y))ensureAllow(y);});S.updated=Date.now();try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}status('Đã lưu');if(dbDoc){clearTimeout(tmr);tmr=setTimeout(pushDb,700);}}
+function save(){[curDate.slice(0,7),curMonth].forEach(function(y){if(!S.allow[y]&&hasWork(y))ensureAllow(y);});S.updated=Date.now();try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}status('Đã lưu');if(FB.on)fbQueue();if(dbDoc){clearTimeout(tmr);tmr=setTimeout(pushDb,700);}}
 function pushDb(){if(!dbDoc)return;dbDoc.set(JSON.parse(JSON.stringify(S))).then(function(){status('Đã lưu ☁');}).catch(function(){status('Đã lưu trên máy');});}
-function status(t){var e=document.getElementById('st');if(e)e.textContent=t;}
+function status(t){status.last=t;var e=document.getElementById('st');if(e)e.textContent=t;}
 (function(){try{if(!window.claude||!claude.use)return;
  Promise.all([claude.use('db'),claude.use('user')]).then(function(r){var db=r[0],user=r[1];if(!db||!user)return;
   return user.id().then(function(id){if(!id)return;dbDoc=db.collection('data/users/'+id).doc('thomay');
@@ -220,6 +223,56 @@ function status(t){var e=document.getElementById('st');if(e)e.textContent=t;}
     else if(S.updated)pushDb();status('Đã đồng bộ ☁');});});
  }).catch(function(){});}catch(e){}})();
 
+/* ---- Firebase: đăng nhập Google + đồng bộ đám mây ---- */
+var FBCFG={apiKey:"AIzaSyAZt4Hi18uZ8HqqNAU48B5JezkTbb4G98c",authDomain:"quanly-chitieu.firebaseapp.com",projectId:"quanly-chitieu",storageBucket:"quanly-chitieu.firebasestorage.app",messagingSenderId:"704829445139",appId:"1:704829445139:web:f0e767ab7f7d0777bf1be6"};
+var FB={on:false,user:null,db:null,auth:null,st:{pushed:{},ts:{},linked:false},choose:false,busy:false,last:0,cloudSnap:null},fbT=null,fbLastPull=0;
+function cj(o){return JSON.stringify(o,function(k,v){if(v&&typeof v==='object'&&!Array.isArray(v)){var r={};Object.keys(v).sort().forEach(function(x){r[x]=v[x];});return r;}return v;});}
+function fbKey(){return 'thomay_fb_'+(FB.user?FB.user.uid:'');}
+function fbSaveSt(){try{localStorage.setItem(fbKey(),JSON.stringify(FB.st));}catch(e){}}
+function fbLoadSt(){try{var r=localStorage.getItem(fbKey());FB.st=r?JSON.parse(r):{pushed:{},ts:{},linked:false};}catch(e){FB.st={pushed:{},ts:{},linked:false};}FB.st.pushed=FB.st.pushed||{};FB.st.ts=FB.st.ts||{};}
+function fbCol(){return FB.db.collection('users').doc(FB.user.uid).collection('thomay');}
+function fbEmpty(k){return k==='config'?null:cj({logs:{},meta:{}});}
+function hasLocal(){return Object.keys(S.logs).length>0||S.ops.length>0;}
+function localSave(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+function fbParts(){var p={config:{ops:S.ops,styles:S.styles,settings:S.settings,shifts:S.shifts,leaves:S.leaves,allowDef:S.allowDef,allow:S.allow,lastBackup:S.lastBackup||0}},ms={};
+ for(var d in S.logs){var m=d.slice(0,7);(ms[m]=ms[m]||{logs:{},meta:{}}).logs[d]=S.logs[d];}
+ for(var d2 in S.meta){var m2=d2.slice(0,7);(ms[m2]=ms[m2]||{logs:{},meta:{}}).meta[d2]=S.meta[d2];}
+ for(var k in ms)p['m_'+k]=ms[k];return p;}
+function fbApply(key,j){var d=JSON.parse(JSON.stringify(S));
+ if(key==='config'){var c=JSON.parse(j);['ops','styles','settings','shifts','leaves','allowDef','allow'].forEach(function(f){if(c[f]!==undefined)d[f]=c[f];});d.lastBackup=c.lastBackup||d.lastBackup||0;}
+ else{var ym=key.slice(2),c2=JSON.parse(j);Object.keys(d.logs).forEach(function(x){if(x.indexOf(ym)===0)delete d.logs[x];});Object.keys(d.meta).forEach(function(x){if(x.indexOf(ym)===0)delete d.meta[x];});var L=c2.logs||{},M=c2.meta||{};for(var a in L)d.logs[a]=L[a];for(var b in M)d.meta[b]=M[b];}
+ S=norm(d);}
+function fbPush(){if(!FB.user||!FB.db||FB.choose||!FB.st.linked)return Promise.resolve();
+ var p=fbParts(),keys=Object.keys(p),col=fbCol(),jobs=[];
+ Object.keys(FB.st.pushed).forEach(function(k){if(k!=='config'&&keys.indexOf(k)<0)keys.push(k);});
+ keys.forEach(function(k){var lj=(k in p)?cj(p[k]):fbEmpty(k);
+  if(k!=='config'&&lj===fbEmpty(k)){if(FB.st.pushed[k]!==undefined){jobs.push(col.doc(k).delete().then(function(){delete FB.st.pushed[k];delete FB.st.ts[k];}));}return;}
+  if(FB.st.pushed[k]===lj)return;var u=Date.now();
+  jobs.push(col.doc(k).set({j:lj,u:u}).then(function(){FB.st.pushed[k]=lj;FB.st.ts[k]=u;}));});
+ if(!jobs.length)return Promise.resolve();
+ return Promise.all(jobs).then(function(){fbSaveSt();FB.last=Date.now();status('Đã đồng bộ ☁');}).catch(function(){status('Chưa đồng bộ được');});}
+function fbQueue(){if(!FB.user||!FB.st.linked||FB.choose)return;clearTimeout(fbT);fbT=setTimeout(fbPush,1500);}
+function fbSync(){if(!FB.user||!FB.db||FB.busy)return;FB.busy=true;fbLastPull=Date.now();status('Đang đồng bộ…');var changed=false;
+ fbCol().get().then(function(snap){var cloud={};snap.forEach(function(d){var x=d.data();if(x&&typeof x.j==='string')cloud[d.id]={j:x.j,u:x.u||0};});
+  var ck=Object.keys(cloud);
+  if(!FB.st.linked){
+   if(!ck.length){FB.st.linked=true;fbSaveSt();return fbPush();}
+   if(!hasLocal()){ck.forEach(function(k){fbApply(k,cloud[k].j);FB.st.pushed[k]=cloud[k].j;FB.st.ts[k]=cloud[k].u;});FB.st.linked=true;fbSaveSt();localSave();changed=true;status('Đã đồng bộ ☁');return;}
+   FB.choose=true;FB.cloudSnap=cloud;changed=true;status('Cần chọn cách đồng bộ');return;}
+  var p=fbParts(),keys={};Object.keys(p).forEach(function(k){keys[k]=1;});ck.forEach(function(k){keys[k]=1;});
+  Object.keys(keys).forEach(function(k){var lj=(k in p)?cj(p[k]):fbEmpty(k),base=(FB.st.pushed[k]!==undefined)?FB.st.pushed[k]:fbEmpty(k),dirty=lj!==base,c=cloud[k];
+   if(c){if(c.j===lj){FB.st.pushed[k]=c.j;FB.st.ts[k]=c.u;return;}
+    if(!dirty||c.u>(S.updated||0)){fbApply(k,c.j);FB.st.pushed[k]=c.j;FB.st.ts[k]=c.u;changed=true;}}
+   else if(k!=='config'&&FB.st.pushed[k]!==undefined&&!dirty){fbApply(k,fbEmpty(k));delete FB.st.pushed[k];delete FB.st.ts[k];changed=true;}});
+  fbSaveSt();if(changed)localSave();return fbPush();
+ }).then(function(){FB.busy=false;if(changed||(view==='ops'&&openSec==='tk'))render();if(!FB.choose&&FB.st.linked&&status.last!=='Chưa đồng bộ được')status('Đã đồng bộ ☁');},function(e){FB.busy=false;status('Chưa đồng bộ được (kiểm tra mạng)');});}
+function authErr(e){var c=(e&&e.code)||'',m={'auth/unauthorized-domain':'Tên miền này chưa được thêm vào Authorized domains trong Firebase.','auth/operation-not-allowed':'Cách đăng nhập này chưa được bật trong Firebase.','auth/wrong-password':'Sai email hoặc mật khẩu.','auth/invalid-credential':'Sai email hoặc mật khẩu.','auth/user-not-found':'Sai email hoặc mật khẩu.','auth/invalid-email':'Email không hợp lệ.','auth/email-already-in-use':'Email này đã có tài khoản, hãy bấm Đăng nhập.','auth/weak-password':'Mật khẩu cần ít nhất 6 ký tự.','auth/network-request-failed':'Không có mạng.','auth/too-many-requests':'Thử quá nhiều lần, hãy đợi một lúc.'};alert(m[c]||('Lỗi đăng nhập: '+(c||(e&&e.message)||'')));}
+function fbGoogle(){var pr=new firebase.auth.GoogleAuthProvider();pr.setCustomParameters({prompt:'select_account'});
+ FB.auth.signInWithPopup(pr).catch(function(e){var c=e&&e.code;if(c==='auth/popup-blocked'||c==='auth/operation-not-supported-in-this-environment'||c==='auth/web-storage-unsupported'){FB.auth.signInWithRedirect(pr);return;}if(c==='auth/popup-closed-by-user'||c==='auth/cancelled-popup-request')return;authErr(e);});}
+function fbAuthChanged(u){FB.user=u||null;FB.choose=false;FB.cloudSnap=null;if(!u){FB.st={pushed:{},ts:{},linked:false};status('☁ Chưa đăng nhập');render();return;}fbLoadSt();render();fbSync();}
+(function(){try{if(window.firebase&&firebase.initializeApp){firebase.initializeApp(FBCFG);FB.auth=firebase.auth();FB.db=firebase.firestore();try{FB.db.settings({experimentalAutoDetectLongPolling:true,merge:true});}catch(e){}FB.on=true;FB.auth.onAuthStateChanged(fbAuthChanged);FB.auth.getRedirectResult().catch(function(e){if(e&&e.code)authErr(e);});
+ document.addEventListener('visibilitychange',function(){if(!document.hidden&&FB.user&&Date.now()-fbLastPull>30000)fbSync();});
+ window.addEventListener('online',function(){if(FB.user){fbPush();}});}}catch(e){}})();
 /* ---- sao lưu (nén mã cho ngắn) ---- */
 function toB64(buf){var b=new Uint8Array(buf),t='';for(var i=0;i<b.length;i++)t+=String.fromCharCode(b[i]);return btoa(t).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
 function fromB64(t){t=t.replace(/-/g,'+').replace(/_/g,'/');while(t.length%4)t+='=';var q=atob(t),b=new Uint8Array(q.length);for(var i=0;i<q.length;i++)b[i]=q.charCodeAt(i);return b;}
@@ -390,6 +443,13 @@ function accSec(key,title,sum,body,lvl){var sub=lvl==='s',o=(sub?openSty:openSec
  return '<div class="card'+(sub?' sub':'')+'"><button class="accb" data-a="acc" data-l="'+(sub?'s':'t')+'" data-k="'+key+'"><span><b>'+title+'</b><small>'+sum+'</small></span><span class="chev">'+(o?'▴':'▾')+'</span></button>'+
  (o?'<div class="accc">'+body+'<button class="accx" data-a="acc" data-l="'+(sub?'s':'t')+'" data-k="'+key+'">Đóng</button></div>':'')+'</div>';}
 function vOps(){var T=S.settings,h='',b='';
+ var tk,tsum;
+ if(!FB.on){tsum='Chỉ dùng ở bản GitHub hoặc Netlify';tk='<div class="mut">Đăng nhập và đồng bộ chỉ dùng được ở bản GitHub hoặc Netlify, không dùng được ở link claude.ai.</div>';}
+ else if(!FB.user){tsum='Chưa đăng nhập';tk='<div class="mut" style="margin-bottom:10px">Đăng nhập để dữ liệu lưu trên đám mây, dùng được trên máy khác và không mất khi mất điện thoại.</div><button class="pri" data-a="fbgoogle" style="width:100%">Đăng nhập bằng Google</button><div class="lab" style="margin-top:16px;font-weight:600;color:var(--ink)">Đăng nhập bằng email và mật khẩu</div><div class="mut" style="margin-bottom:6px">Lần đầu hãy bấm Tạo tài khoản, các lần sau bấm Đăng nhập.</div><input id="fbem" type="email" inputmode="email" placeholder="Email" autocomplete="username"><input id="fbpw" type="password" placeholder="Mật khẩu (từ 6 ký tự)" autocomplete="current-password" style="margin-top:8px"><button class="ghost" data-a="fbshowpw" style="color:var(--mut);padding:6px 4px;min-height:36px">👁 Hiện / ẩn mật khẩu</button><div class="grid2" style="margin-top:4px"><button data-a="fbemail">Đăng nhập</button><button data-a="fbsignup">Tạo tài khoản</button></div><button class="ghost" data-a="fbreset" style="width:100%;color:var(--mut)">Quên mật khẩu</button>';}
+ else{tsum=esc(FB.user.email||'Đã đăng nhập');var info='<div style="margin-bottom:8px">Đang đăng nhập: <b>'+esc(FB.user.email||'')+'</b></div>';
+  if(FB.choose)tk=info+'<div class="mut" style="margin-bottom:10px">Tài khoản này đã có dữ liệu trên đám mây, máy này cũng có dữ liệu riêng. Hãy chọn một cách:</div><button class="pri" data-a="fbpull" style="width:100%;margin-bottom:8px">Lấy dữ liệu từ đám mây về máy này</button><button class="ghost" data-a="fbpushlocal" style="width:100%">Ghi dữ liệu máy này lên đám mây (thay dữ liệu cũ)</button>';
+  else{var lt=FB.last?new Date(FB.last):null;tk=info+'<div class="mut" style="margin-bottom:10px">'+(lt?'Đồng bộ lần cuối lúc '+pad(lt.getHours())+':'+pad(lt.getMinutes()):'Dữ liệu tự đồng bộ khi bạn thay đổi')+'</div><div class="grid2"><button class="pri" data-a="fbsync">Đồng bộ ngay</button><button data-a="fbout">Đăng xuất</button></div>';}}
+ h+=accSec('tk','Tài khoản &amp; đồng bộ',tsum,tk);
  var vsm=visStyles(setMonth),pvm=addMonths(setMonth,-1);
  b='<div class="nav"><button class="sq" data-a="smprev">‹</button><div class="t">'+mlabel(setMonth)+'</div><button class="sq" data-a="smnext">›</button></div>'+(!vsm.length&&visStyles(pvm).length?'<button class="pri" data-a="copystyles" data-m="'+setMonth+'" style="width:100%;margin-bottom:10px">Chép mã hàng từ '+mlabel(pvm).toLowerCase()+'</button>':'')+(!vsm.length?'<div class="mut" style="margin-bottom:8px">Tháng này chưa có mã hàng. Thêm mới bên dưới.</div>':'');
  vsm.forEach(function(st){var ops=S.ops.filter(function(o){return o.s===st.id;}),c='<div class="mut">Tên mã hàng</div><input data-c="stname" data-id="'+st.id+'" value="'+esc(st.name)+'" style="font-weight:700"><h2 style="margin-top:12px">Công đoạn và đơn giá</h2>';
@@ -461,6 +521,15 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-a]')
  else if(a==='bar'){selBar=b.dataset.k;var cid=selBar.split(':')[0];tips[cid]=b.dataset.tip;render();return;}
  else if(a==='addop'){var sid0=b.dataset.s,ni=document.getElementById('nn_'+sid0),pi=document.getElementById('np_'+sid0);var n=ni.value.trim(),p=+pi.value||0;if(!n){ni.focus();return;}S.ops.push({id:uid(),name:n,price:p,s:sid0});save();}
  else if(a==='style'){curStyle=id;}
+ else if(a==='gotk'){view='ops';openSec='tk';openSty='';}
+ else if(a==='fbgoogle'){fbGoogle();return;}
+ else if(a==='fbemail'||a==='fbsignup'){var em=document.getElementById('fbem').value.trim(),pw=document.getElementById('fbpw').value;if(!em||!pw){alert('Hãy nhập email và mật khẩu.');return;}(a==='fbemail'?FB.auth.signInWithEmailAndPassword(em,pw):FB.auth.createUserWithEmailAndPassword(em,pw)).catch(authErr);return;}
+ else if(a==='fbreset'){var em2=document.getElementById('fbem').value.trim();if(!em2){alert('Nhập email vào ô Email trước.');return;}FB.auth.sendPasswordResetEmail(em2).then(function(){alert('Đã gửi email đặt lại mật khẩu.');},authErr);return;}
+ else if(a==='fbshowpw'){var pi2=document.getElementById('fbpw');if(pi2)pi2.type=(pi2.type==='password'?'text':'password');return;}
+ else if(a==='fbsync'){fbSync();return;}
+ else if(a==='fbout'){if(!confirm('Đăng xuất? Dữ liệu vẫn còn trên máy này và trên đám mây.'))return;FB.auth.signOut();return;}
+ else if(a==='fbpull'){var cs=FB.cloudSnap||{};S=norm({});Object.keys(cs).forEach(function(k){fbApply(k,cs[k].j);FB.st.pushed[k]=cs[k].j;FB.st.ts[k]=cs[k].u;});FB.st.linked=true;FB.choose=false;FB.cloudSnap=null;fbSaveSt();localSave();status('Đã đồng bộ ☁');}
+ else if(a==='fbpushlocal'){if(!confirm('Dữ liệu cũ trên đám mây sẽ bị thay bằng dữ liệu của máy này. Tiếp tục?'))return;var cs2=FB.cloudSnap||{};FB.st.pushed={};Object.keys(cs2).forEach(function(k){if(k!=='config')FB.st.pushed[k]=cs2[k].j;});FB.st.linked=true;FB.choose=false;FB.cloudSnap=null;fbSaveSt();fbPush();}
  else if(a==='vz'){var zen=S.logs[curDate]&&S.logs[curDate][id],zv=b.dataset.v;
   if(zen){zen.zs=zen.zs||[];var zi=zen.zs.indexOf(zv);if(zi>=0)zen.zs.splice(zi,1);else zen.zs.push(zv);if(!zen.zs.length)delete zen.zs;save();}
   else{var zk=id+'|'+curDate,zl=pend[zk]=pend[zk]||[],zj=zl.indexOf(zv);if(zj>=0)zl.splice(zj,1);else zl.push(zv);}}
